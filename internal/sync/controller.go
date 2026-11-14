@@ -461,7 +461,9 @@ func (c *Controller) Message() string {
 func (c *Controller) Colors() []int {
 	c.uiMu.RLock()
 	defer c.uiMu.RUnlock()
-	return append([]int(nil), c.ui.colors...)
+	out := make([]int, len(c.ui.colors))
+	copy(out, c.ui.colors)
+	return out
 }
 
 // Playback returns the current playback state, or nil.

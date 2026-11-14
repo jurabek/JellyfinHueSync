@@ -149,13 +149,11 @@ func (s *Store) Mutate(fn func(*AppConfig)) {
 }
 
 func (s *Store) load() AppConfig {
-	data, err := os.ReadFile(filepath.Join(s.dir, "config.json"))
-	if err != nil {
-		return AppConfig{}
-	}
-	var cfg AppConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return AppConfig{}
+	cfg := AppConfig{}
+	if data, err := os.ReadFile(filepath.Join(s.dir, "config.json")); err == nil {
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			cfg = AppConfig{}
+		}
 	}
 	if cfg.Options == (SyncOptions{}) {
 		cfg.Options = DefaultOptions()

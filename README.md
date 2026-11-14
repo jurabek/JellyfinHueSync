@@ -233,8 +233,9 @@ CONFIG_DIR=./config PORT=8091 go run ./cmd/jellyfin-hue-sync
 ```
 
 `CONFIG_DIR` and `PORT` environment variables control storage and the HTTP
-port. The UI is served from `internal/web/index.html` (embedded into the binary
-via `//go:embed`); the HTTP API is under `/api/*`.
+port. The UI is a Vue app served from `internal/web/` (embedded into the binary
+via `//go:embed`), using the vendored global Vue build — no Node toolchain
+required. The HTTP API is under `/api/*`.
 
 ### Layout
 
@@ -244,5 +245,5 @@ internal/app/            HTTP routes, DTOs, application facade
 internal/config/         config.json persistence (0600, atomic writes)
 internal/hue/            Hue HTTPS API, DTLS-PSK stream, packet, discovery, CA
 internal/sync/           ffmpeg decode, segments, color math, smoothing, controller
-internal/web/            embedded single-file web UI
+internal/web/            embedded Vue web UI (vendored vue.global.prod.js)
 ```

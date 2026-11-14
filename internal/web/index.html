@@ -130,21 +130,20 @@
     background: #1c2230; border: 1px solid var(--border);
     border-left: 3px solid var(--accent);
     border-radius: 8px; padding: 12px 16px; font-size: 14px;
-    display: none; z-index: 10;
+    z-index: 10;
   }
   .toast.err { border-left-color: var(--red); }
   .toast.ok { border-left-color: var(--green); }
   code { font-family: ui-monospace, monospace; font-size: 12px; }
-  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
-  .kv:last-child { border-bottom: none; }
-  .kv .k { color: var(--muted); }
   a { color: var(--accent); }
+  [v-cloak] { display: none; }
 </style>
 </head>
 <body>
+<div id="app" v-cloak>
 <header>
   <h1>Jellyfin Hue Sync</h1>
-  <span class="pill" id="statusPill">Ready</span>
+  <span class="pill" :class="{ syncing: state && state.syncing }">{{ statusText }}</span>
 </header>
 
 <main>
@@ -152,24 +151,36 @@
     <div class="card">
       <h2>01 · Hue Bridge</h2>
       <div class="row">
-        <input type="text" id="bridgeIp" class="grow" placeholder="Bridge IP address, e.g. 192.168.1.20">
-        <button id="identifyBtn">Identify</button>
-        <button id="searchBtn">Search network</button>
+        <input type="text" v-model="bridgeIp" class="grow" placeholder="Bridge IP address, e.g. 192.168.1.20" @keyup.enter="identify()">
+        <button :disabled="busy.identify" @click="identify()">Identify</button>
+        <button :disabled="busy.discover" @click="discover()">Search network</button>
       </div>
-      <div id="discovered" class="list" style="margin-bottom:10px"></div>
-      <div id="bridgeInfo" class="muted" style="margin-bottom:10px"></div>
+      <div class="list" style="margin-bottom:10px">
+        <div v-for="b in discovered" :key="b.id || b.ip" class="item" @click="pickDiscovered(b)">
+          <div class="title">{{ b.name || 'Hue Bridge' }}</div>
+          <div class="sub">{{ b.ip }}</div>
+        </div>
+        <div v-if="state && state.discovering" class="muted">Searching the local network…</div>
+      </div>
+      <div class="muted" style="margin-bottom:10px">{{ bridgeInfo }}</div>
       <div class="row">
-        <button id="pairBtn" class="primary grow">Pair Bridge</button>
+        <button class="primary grow" :disabled="busy.pair" @click="pair()">{{ busy.pair ? 'Pairing…' : 'Pair Bridge' }}</button>
       </div>
-      <p class="muted" id="pairHint">Search or enter the Bridge IP, identify it, then press Pair and push the button on the Bridge.</p>
+      <p class="muted">Search or enter the Bridge IP, identify it, then press Pair and push the button on the Bridge.</p>
     </div>
 
     <div class="card">
       <h2>02 · Entertainment Area</h2>
       <div class="row">
-        <button id="refreshAreasBtn" class="grow">Refresh areas</button>
+        <button class="grow" :disabled="busy.areas" @click="refreshAreas()">{{ busy.areas ? 'Refreshing…' : 'Refresh areas' }}</button>
       </div>
-      <div id="areas" class="list"></div>
+      <div class="list">
+        <div v-for="a in areas" :key="a.id" class="item" :class="{ selected: a.id === (state && state.areaId) }" @click="selectArea(a.id)">
+          <div class="title">{{ a.name }}</div>
+          <div class="sub">{{ a.channels }} channel{{ a.channels === 1 ? '' : 's' }}{{ a.active ? ' · in use' : '' }}</div>
+        </div>
+        <div v-if="!areas.length" class="muted">No areas found. Create one in the Hue app, then refresh.</div>
+      </div>
       <p class="muted" style="margin-top:10px">Create entertainment areas in the Philips Hue app first.</p>
     </div>
   </div>
@@ -178,31 +189,31 @@
     <div class="card">
       <h2>03 · Jellyfin</h2>
       <div class="row">
-        <input type="text" id="jfUrl" class="grow" placeholder="Jellyfin URL, e.g. http://localhost:8096">
-        <input type="password" id="jfKey" class="grow" placeholder="API key">
+        <input type="text" v-model="jfUrl" class="grow" placeholder="Jellyfin URL, e.g. http://192.168.188.100:8096">
+        <input type="password" v-model="jfKey" class="grow" placeholder="API key">
       </div>
       <div class="row">
-        <input type="text" id="jfDevice" class="grow" placeholder="Device ID (optional)">
-        <input type="text" id="jfUser" class="grow" placeholder="User ID (optional)">
+        <input type="text" v-model="jfDevice" class="grow" placeholder="Device ID (optional)">
+        <input type="text" v-model="jfUser" class="grow" placeholder="User ID (optional)">
       </div>
       <label class="muted">Media path mappings (one per line): <code>jellyfinPath -&gt; containerPath</code></label>
-      <textarea id="jfMappings" rows="3" style="margin:6px 0 10px"
+      <textarea v-model="jfMappings" rows="3" style="margin:6px 0 10px"
         placeholder="/data/media/movies -> /media/movies&#10;/data/media/tv -> /media/tv"></textarea>
       <div class="row">
-        <button id="jfTestBtn">Test connection</button>
-        <button id="jfSaveBtn" class="primary">Save Jellyfin</button>
+        <button :disabled="busy.test" @click="testJellyfin()">Test connection</button>
+        <button class="primary" :disabled="busy.save" @click="saveJellyfin()">Save Jellyfin</button>
       </div>
       <p class="muted" style="margin:0">Syncs the first playing session, or the session matching the Device/User ID when set.</p>
     </div>
 
     <div class="card">
       <h2>04 · Light Response</h2>
-      <div class="slider"><label>Brightness</label><input type="range" id="optBrightness" min="0" max="100" step="1"><span class="val" id="optBrightnessVal"></span></div>
-      <div class="slider"><label>Saturation</label><input type="range" id="optSaturation" min="0" max="200" step="5"><span class="val" id="optSaturationVal"></span></div>
-      <div class="slider"><label>Smoothing</label><input type="range" id="optSmoothing" min="0" max="1000" step="10"><span class="val" id="optSmoothingVal"></span></div>
+      <div class="slider"><label>Brightness</label><input type="range" min="0" max="100" step="1" v-model.number="optBrightness"><span class="val">{{ optBrightness }}%</span></div>
+      <div class="slider"><label>Saturation</label><input type="range" min="0" max="200" step="5" v-model.number="optSaturation"><span class="val">{{ optSaturation }}%</span></div>
+      <div class="slider"><label>Smoothing</label><input type="range" min="0" max="1000" step="10" v-model.number="optSmoothing"><span class="val">{{ optSmoothing }} ms</span></div>
       <div class="row" style="align-items:center">
-        <label style="color:var(--muted);font-size:14px"><input type="checkbox" id="optInvert" style="margin-right:8px">Invert left / right</label>
-        <button id="optSaveBtn" class="primary" style="margin-left:auto">Save options</button>
+        <label style="color:var(--muted);font-size:14px"><input type="checkbox" v-model="optInvert" style="margin-right:8px">Invert left / right</label>
+        <button class="primary" style="margin-left:auto" :disabled="busy.options" @click="saveOptions()">Save options</button>
       </div>
       <p class="muted" style="margin:8px 0 0">Options apply when you start the next sync session.</p>
     </div>
@@ -210,241 +221,223 @@
     <div class="card">
       <h2>05 · Sync</h2>
       <div class="status-line">
-        <span class="dot" id="dot"></span>
-        <strong id="statusText" style="flex:1">Ready</strong>
-        <button id="startBtn" class="primary">▶ Start sync</button>
-        <button id="stopBtn" class="danger">■ Stop</button>
+        <span class="dot" :class="{ on: state && state.syncing }"></span>
+        <strong style="flex:1">{{ statusText }}</strong>
+        <button class="primary" :disabled="state && state.syncing || busy.start" @click="startSync()">▶ Start sync</button>
+        <button class="danger" :disabled="!(state && state.syncing) || busy.stop" @click="stopSync()">■ Stop</button>
       </div>
-      <div id="playback" class="muted" style="margin-bottom:10px"></div>
-      <div class="swatches" id="swatches"></div>
-      <div id="syncStats" class="muted"></div>
+      <div class="muted" style="margin-bottom:10px">{{ playbackText }}</div>
+      <div class="swatches">
+        <div v-for="(c, i) in colors" :key="i" class="swatch" :style="swatchStyle(c)"></div>
+      </div>
+      <div class="muted">{{ syncStats }}</div>
     </div>
   </div>
 </main>
 
-<div class="toast" id="toast"></div>
+<div class="toast" :class="toastKind" v-if="toastVisible">{{ toastMsg }}</div>
+</div>
 
+<script src="vue.global.prod.js"></script>
 <script>
-const $ = (id) => document.getElementById(id);
-let state = null;
-let toastTimer = null;
+const { createApp } = Vue;
 
-function toast(msg, kind) {
-  const t = $('toast');
-  t.textContent = msg;
-  t.className = 'toast ' + (kind || '');
-  t.style.display = 'block';
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 4000);
-}
-
-async function api(path, method, body) {
-  const opts = { method: method || 'GET', headers: {} };
-  if (body !== undefined) {
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
-  }
-  const res = await fetch(path, opts);
-  let data = null;
-  try { data = await res.json(); } catch (e) {}
-  if (!res.ok) {
-    throw new Error((data && data.error) || ('HTTP ' + res.status));
-  }
-  return data;
-}
-
-function setVal(id, v) {
-  const el = $(id);
-  if (document.activeElement !== el) el.value = v;
-}
-
-function render() {
-  if (!state) return;
-  const pill = $('statusPill');
-  pill.textContent = state.status || 'Ready';
-  pill.className = 'pill' + (state.syncing ? ' syncing' : '');
-
-  setVal('bridgeIp', state.bridgeIp || '');
-  const b = state.bridgeName ? (state.bridgeName + ' · ' + state.bridgeId) : '';
-  $('bridgeInfo').textContent = state.paired ? ('Paired: ' + b) : (b || 'Not paired yet.');
-
-  const disc = $('discovered');
-  disc.innerHTML = '';
-  (state.discovered || []).forEach(br => {
-    const d = document.createElement('div');
-    d.className = 'item';
-    d.innerHTML = '<div class="title">' + escapeHtml(br.name || 'Hue Bridge') +
-      '</div><div class="sub">' + escapeHtml(br.ip) + '</div>';
-    d.onclick = () => { $('bridgeIp').value = br.ip; identify(br.ip); };
-    disc.appendChild(d);
-  });
-  if (state.discovering) {
-    const d = document.createElement('div');
-    d.className = 'muted';
-    d.textContent = 'Searching the local network…';
-    disc.appendChild(d);
-  }
-
-  const areas = $('areas');
-  areas.innerHTML = '';
-  (state.areas || []).forEach(a => {
-    const el = document.createElement('div');
-    el.className = 'item' + (a.id === state.areaId ? ' selected' : '');
-    el.innerHTML = '<div class="title">' + escapeHtml(a.name) +
-      '</div><div class="sub">' + a.channels + ' channel' + (a.channels === 1 ? '' : 's') +
-      (a.active ? ' · in use' : '') + '</div>';
-    el.onclick = async () => {
-      try { await api('/api/area', 'POST', { id: a.id }); await poll(); }
-      catch (e) { toast(e.message, 'err'); }
+createApp({
+  data() {
+    return {
+      state: null,
+      formLoaded: false,
+      bridgeIp: '',
+      jfUrl: '',
+      jfKey: '',
+      jfDevice: '',
+      jfUser: '',
+      jfMappings: '',
+      optBrightness: 75,
+      optSaturation: 115,
+      optSmoothing: 150,
+      optInvert: false,
+      busy: { identify: false, discover: false, pair: false, areas: false, test: false, save: false, options: false, start: false, stop: false },
+      toastMsg: '',
+      toastKind: '',
+      toastVisible: false,
+      toastTimer: null,
     };
-    areas.appendChild(el);
-  });
-  if (!state.areas || !state.areas.length) {
-    areas.innerHTML = '<div class="muted">No areas found. Create one in the Hue app, then refresh.</div>';
-  }
-
-  setVal('jfUrl', state.jellyfinUrl || '');
-  setVal('jfDevice', state.jellyfinDeviceId || '');
-  setVal('jfUser', state.jellyfinUserId || '');
-  if (document.activeElement !== $('jfMappings')) {
-    $('jfMappings').value = (state.mediaMappings || []).map(m => m.jellyfin + ' -> ' + m.container).join('\n');
-  }
-
-  const o = state.options || {};
-  const bs = Math.round((o.brightness ?? 0.75) * 100);
-  const sa = Math.round((o.saturation ?? 1.15) * 100);
-  if (document.activeElement !== $('optBrightness')) $('optBrightness').value = bs;
-  if (document.activeElement !== $('optSaturation')) $('optSaturation').value = sa;
-  if (document.activeElement !== $('optSmoothing')) $('optSmoothing').value = o.smoothingMs ?? 150;
-  if (document.activeElement !== $('optInvert')) $('optInvert').checked = o.invertHorizontal ?? false;
-  $('optBrightnessVal').textContent = bs + '%';
-  $('optSaturationVal').textContent = sa + '%';
-  $('optSmoothingVal').textContent = (o.smoothingMs ?? 150) + ' ms';
-
-  const dot = $('dot');
-  dot.className = 'dot' + (state.syncing ? ' on' : '');
-  $('statusText').textContent = state.status || 'Ready';
-  $('startBtn').disabled = state.syncing;
-  $('stopBtn').disabled = !state.syncing;
-  $('syncStats').textContent = state.packets ? (state.packets + ' packets sent') : '';
-
-  const pb = state.playback;
-  $('playback').textContent = pb
-    ? ((pb.itemName || 'playing') + ' · ' + formatTime(pb.positionSeconds) + (pb.isPaused ? ' · paused' : ''))
-    : '';
-
-  const sw = $('swatches');
-  sw.innerHTML = '';
-  (state.colors || []).forEach(c => {
-    const d = document.createElement('div');
-    d.className = 'swatch';
-    d.style.background = '#' + c.toString(16).padStart(6, '0');
-    sw.appendChild(d);
-  });
-}
-
-function formatTime(s) {
-  s = Math.max(0, Math.floor(s));
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  const pad = (n) => String(n).padStart(2, '0');
-  return (h ? pad(h) + ':' : '') + pad(m) + ':' + pad(sec);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-async function poll() {
-  try { state = await api('/api/state'); render(); }
-  catch (e) { /* transient */ }
-}
-
-async function identify(ip) {
-  try {
-    const b = await api('/api/identify', 'POST', { ip: ip || $('bridgeIp').value });
-    toast('Identified ' + (b.name || b.ip), 'ok');
-  } catch (e) { toast(e.message, 'err'); }
-  await poll();
-}
-
-function parseMappings(text) {
-  return text.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
-    const parts = line.split('->');
-    if (parts.length === 2) return { jellyfin: parts[0].trim(), container: parts[1].trim() };
-    return null;
-  }).filter(Boolean);
-}
-
-$('searchBtn').onclick = async () => {
-  try { await api('/api/discover', 'POST'); toast('Searching…'); }
-  catch (e) { toast(e.message, 'err'); }
-  await poll();
-};
-$('identifyBtn').onclick = () => identify();
-$('pairBtn').onclick = async () => {
-  try {
-    $('pairHint').textContent = 'Press the button on the Bridge now…';
-    await api('/api/pair', 'POST', { ip: $('bridgeIp').value });
-    toast('Bridge paired', 'ok');
-    $('pairHint').textContent = 'Bridge paired. Select an Entertainment area.';
-  } catch (e) {
-    toast(e.message, 'err');
-    $('pairHint').textContent = 'Press the button on the Bridge, then try Pair again.';
-  }
-  await poll();
-};
-$('refreshAreasBtn').onclick = async () => {
-  try { await api('/api/areas'); toast('Areas refreshed', 'ok'); }
-  catch (e) { toast(e.message, 'err'); }
-  await poll();
-};
-$('jfTestBtn').onclick = async () => {
-  try {
-    const ok = await api('/api/jellyfin/test', 'POST', { url: $('jfUrl').value, apiKey: $('jfKey').value });
-    toast(ok && ok.ok ? 'Jellyfin connected' : 'Jellyfin connection failed', ok && ok.ok ? 'ok' : 'err');
-  } catch (e) { toast(e.message, 'err'); }
-};
-$('jfSaveBtn').onclick = async () => {
-  try {
-    await api('/api/jellyfin', 'POST', {
-      url: $('jfUrl').value,
-      apiKey: $('jfKey').value,
-      userId: $('jfUser').value.trim(),
-      deviceId: $('jfDevice').value.trim(),
-      mediaMappings: parseMappings($('jfMappings').value)
-    });
-    toast('Jellyfin settings saved', 'ok');
-  } catch (e) { toast(e.message, 'err'); }
-};
-$('optSaveBtn').onclick = async () => {
-  try {
-    await api('/api/options', 'POST', {
-      brightness: parseInt($('optBrightness').value, 10) / 100,
-      saturation: parseInt($('optSaturation').value, 10) / 100,
-      smoothingMs: parseInt($('optSmoothing').value, 10),
-      invertHorizontal: $('optInvert').checked,
-      extractFps: state.options.extractFps,
-      streamRate: state.options.streamRate,
-      frameWidth: state.options.frameWidth,
-      frameHeight: state.options.frameHeight,
-      segmentSeconds: state.options.segmentSeconds
-    });
-    toast('Options saved', 'ok');
-  } catch (e) { toast(e.message, 'err'); }
-};
-$('startBtn').onclick = async () => {
-  try { await api('/api/sync/start', 'POST'); toast('Starting sync…'); }
-  catch (e) { toast(e.message, 'err'); }
-  await poll();
-};
-$('stopBtn').onclick = async () => {
-  try { await api('/api/sync/stop', 'POST'); toast('Stopped', 'ok'); }
-  catch (e) { toast(e.message, 'err'); }
-  await poll();
-};
-
-poll();
-setInterval(poll, 1000);
+  },
+  computed: {
+    statusText() { return (this.state && this.state.status) || 'Ready'; },
+    bridgeInfo() {
+      if (!this.state) return 'Not paired yet.';
+      const b = this.state.bridgeName ? `${this.state.bridgeName} · ${this.state.bridgeId}` : '';
+      return this.state.paired ? ('Paired: ' + b) : (b || 'Not paired yet.');
+    },
+    areas() { return (this.state && this.state.areas) || []; },
+    discovered() { return (this.state && this.state.discovered) || []; },
+    colors() { return (this.state && this.state.colors) || []; },
+    playbackText() {
+      const pb = this.state && this.state.playback;
+      if (!pb) return '';
+      return `${pb.itemName || 'playing'} · ${this.formatTime(pb.positionSeconds)}${pb.isPaused ? ' · paused' : ''}`;
+    },
+    syncStats() { return this.state && this.state.packets ? `${this.state.packets} packets sent` : ''; },
+  },
+  methods: {
+    async api(path, method, body) {
+      const opts = { method: method || 'GET', headers: {} };
+      if (body !== undefined) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const res = await fetch(path, opts);
+      let data = null;
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+      return data;
+    },
+    toast(msg, kind) {
+      this.toastMsg = msg;
+      this.toastKind = kind || '';
+      this.toastVisible = true;
+      clearTimeout(this.toastTimer);
+      this.toastTimer = setTimeout(() => { this.toastVisible = false; }, 4000);
+    },
+    async poll() {
+      try {
+        const data = await this.api('/api/state');
+        if (!this.formLoaded) {
+          this.loadForm(data);
+          this.formLoaded = true;
+        }
+        this.state = data;
+      } catch (e) { /* transient */ }
+    },
+    loadForm(s) {
+      this.bridgeIp = s.bridgeIp || '';
+      this.jfUrl = s.jellyfinUrl || '';
+      this.jfDevice = s.jellyfinDeviceId || '';
+      this.jfUser = s.jellyfinUserId || '';
+      this.jfMappings = (s.mediaMappings || []).map(m => m.jellyfin + ' -> ' + m.container).join('\n');
+      const o = s.options || {};
+      this.optBrightness = Math.round((o.brightness ?? 0.75) * 100);
+      this.optSaturation = Math.round((o.saturation ?? 1.15) * 100);
+      this.optSmoothing = o.smoothingMs ?? 150;
+      this.optInvert = o.invertHorizontal ?? false;
+    },
+    async identify(ip) {
+      this.busy.identify = true;
+      try {
+        const b = await this.api('/api/identify', 'POST', { ip: ip || this.bridgeIp });
+        this.toast('Identified ' + (b.name || b.ip), 'ok');
+      } catch (e) { this.toast(e.message, 'err'); }
+      this.busy.identify = false;
+      await this.poll();
+    },
+    async discover() {
+      this.busy.discover = true;
+      try { await this.api('/api/discover', 'POST'); this.toast('Searching…'); }
+      catch (e) { this.toast(e.message, 'err'); }
+      this.busy.discover = false;
+      await this.poll();
+    },
+    async pickDiscovered(bridge) {
+      this.bridgeIp = bridge.ip;
+      await this.identify(bridge.ip);
+    },
+    async pair() {
+      this.busy.pair = true;
+      try {
+        await this.api('/api/pair', 'POST', { ip: this.bridgeIp });
+        this.toast('Bridge paired', 'ok');
+      } catch (e) { this.toast(e.message, 'err'); }
+      this.busy.pair = false;
+      await this.poll();
+    },
+    async refreshAreas() {
+      this.busy.areas = true;
+      try { await this.api('/api/areas'); this.toast('Areas refreshed', 'ok'); }
+      catch (e) { this.toast(e.message, 'err'); }
+      this.busy.areas = false;
+      await this.poll();
+    },
+    async selectArea(id) {
+      try { await this.api('/api/area', 'POST', { id }); await this.poll(); }
+      catch (e) { this.toast(e.message, 'err'); }
+    },
+    async testJellyfin() {
+      this.busy.test = true;
+      try {
+        const ok = await this.api('/api/jellyfin/test', 'POST', { url: this.jfUrl, apiKey: this.jfKey });
+        this.toast(ok && ok.ok ? 'Jellyfin connected' : 'Jellyfin connection failed', ok && ok.ok ? 'ok' : 'err');
+      } catch (e) { this.toast(e.message, 'err'); }
+      this.busy.test = false;
+    },
+    async saveJellyfin() {
+      this.busy.save = true;
+      try {
+        await this.api('/api/jellyfin', 'POST', {
+          url: this.jfUrl,
+          apiKey: this.jfKey,
+          userId: this.jfUser.trim(),
+          deviceId: this.jfDevice.trim(),
+          mediaMappings: this.parseMappings(this.jfMappings),
+        });
+        this.toast('Jellyfin settings saved', 'ok');
+      } catch (e) { this.toast(e.message, 'err'); }
+      this.busy.save = false;
+    },
+    async saveOptions() {
+      this.busy.options = true;
+      try {
+        const o = (this.state && this.state.options) || {};
+        await this.api('/api/options', 'POST', {
+          brightness: this.optBrightness / 100,
+          saturation: this.optSaturation / 100,
+          smoothingMs: this.optSmoothing,
+          invertHorizontal: this.optInvert,
+          extractFps: o.extractFps,
+          streamRate: o.streamRate,
+          frameWidth: o.frameWidth,
+          frameHeight: o.frameHeight,
+          segmentSeconds: o.segmentSeconds,
+        });
+        this.toast('Options saved', 'ok');
+      } catch (e) { this.toast(e.message, 'err'); }
+      this.busy.options = false;
+    },
+    async startSync() {
+      this.busy.start = true;
+      try { await this.api('/api/sync/start', 'POST'); this.toast('Starting sync…'); }
+      catch (e) { this.toast(e.message, 'err'); }
+      this.busy.start = false;
+      await this.poll();
+    },
+    async stopSync() {
+      this.busy.stop = true;
+      try { await this.api('/api/sync/stop', 'POST'); this.toast('Stopped', 'ok'); }
+      catch (e) { this.toast(e.message, 'err'); }
+      this.busy.stop = false;
+      await this.poll();
+    },
+    parseMappings(text) {
+      return text.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+        const parts = line.split('->');
+        if (parts.length === 2) return { jellyfin: parts[0].trim(), container: parts[1].trim() };
+        return null;
+      }).filter(Boolean);
+    },
+    formatTime(s) {
+      s = Math.max(0, Math.floor(s));
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      const pad = n => String(n).padStart(2, '0');
+      return (h ? pad(h) + ':' : '') + pad(m) + ':' + pad(sec);
+    },
+    swatchStyle(c) { return { background: '#' + c.toString(16).padStart(6, '0') }; },
+  },
+  mounted() {
+    this.poll();
+    setInterval(this.poll, 1000);
+  },
+}).mount('#app');
 </script>
 </body>
 </html>

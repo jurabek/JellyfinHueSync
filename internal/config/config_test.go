@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -51,5 +52,19 @@ func TestSyncOptionsUnmarshalJSONPreservesDefaults(t *testing.T) {
 	}
 	if o.SmoothingMs != 150 {
 		t.Errorf("SmoothingMs = %v, want default 150", o.SmoothingMs)
+	}
+}
+
+func TestStoreAppliesDefaultsWhenConfigMissing(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "config"))
+	cfg := s.Config()
+	if cfg.Options.Brightness != 0.75 {
+		t.Errorf("Brightness = %v, want 0.75", cfg.Options.Brightness)
+	}
+	if cfg.Options.ExtractFps != 4 {
+		t.Errorf("ExtractFps = %v, want 4", cfg.Options.ExtractFps)
+	}
+	if cfg.Options.FrameWidth != 96 {
+		t.Errorf("FrameWidth = %v, want 96", cfg.Options.FrameWidth)
 	}
 }
