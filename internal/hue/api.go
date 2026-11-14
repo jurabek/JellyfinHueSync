@@ -104,12 +104,31 @@ func (a *API) Identify(ctx context.Context) (Bridge, error) {
 	return Bridge{IP: a.ip, ID: id, Name: name}, nil
 }
 
-// Pair creates an application key and client key. The Bridge link button must
-// have been pressed within roughly 30 seconds.
+// Pair creates an application key and client key. It retries for up to 30
+// seconds so the Bridge link button can be pressed after the request begins.
 func (a *API) Pair(ctx context.Context) (Credentials, error) {
 	if a.expectedBridgeID == "" {
 		return Credentials{}, errors.New("Identify the Bridge first")
 	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		creds, retry, err := a.pairAttempt(ctx)
+		if err == nil {
+			return creds, nil
+		}
+		if !retry || time.Now().After(deadline) {
+			return Credentials{}, err
+		}
+		select {
+		case <-ctx.Done():
+			return Credentials{}, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func (a *API) pairAttempt(ctx context.Context) (Credentials, bool, error) {
 	var resp []struct {
 		Success *struct {
 			Username  string `json:"username"`
@@ -123,29 +142,29 @@ func (a *API) Pair(ctx context.Context) (Credentials, error) {
 		"devicetype":        "huesync#jellyfin",
 		"generateclientkey": true,
 	}, &resp); err != nil {
-		return Credentials{}, err
+		return Credentials{}, false, err
 	}
 	if len(resp) == 0 {
-		return Credentials{}, errors.New("Bridge returned an empty pairing response")
+		return Credentials{}, false, errors.New("Bridge returned an empty pairing response")
 	}
 	first := resp[0]
 	if first.Error != nil {
 		if first.Error.Type == 101 {
-			return Credentials{}, ErrLinkButtonRequired
+			return Credentials{}, true, ErrLinkButtonRequired
 		}
-		return Credentials{}, fmt.Errorf("Bridge rejected pairing (%d)", first.Error.Type)
+		return Credentials{}, false, fmt.Errorf("Bridge rejected pairing (%d)", first.Error.Type)
 	}
 	if first.Success == nil {
-		return Credentials{}, errors.New("Bridge returned an invalid pairing response")
+		return Credentials{}, false, errors.New("Bridge returned an invalid pairing response")
 	}
 	if !clientKeyRe.MatchString(first.Success.ClientKey) {
-		return Credentials{}, errors.New("Invalid Hue client key")
+		return Credentials{}, false, errors.New("Invalid Hue client key")
 	}
 	return Credentials{
 		Bridge:         Bridge{IP: a.ip, ID: a.expectedBridgeID},
 		ApplicationKey: first.Success.Username,
 		ClientKey:      first.Success.ClientKey,
-	}, nil
+	}, false, nil
 }
 
 // ApplicationID returns the identifier used to claim an Entertainment area.

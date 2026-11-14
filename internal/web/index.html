@@ -164,9 +164,9 @@
       </div>
       <div class="muted" style="margin-bottom:10px">{{ bridgeInfo }}</div>
       <div class="row">
-        <button class="primary grow" :disabled="busy.pair" @click="pair()">{{ busy.pair ? 'Pairing…' : 'Pair Bridge' }}</button>
+        <button class="primary grow" :disabled="busy.pair" @click="pair()">{{ busy.pair ? 'Pairing… press the bridge button now' : 'Pair Bridge' }}</button>
       </div>
-      <p class="muted">Search or enter the Bridge IP, identify it, then press Pair and push the button on the Bridge.</p>
+      <p class="muted">{{ pairHint }}</p>
     </div>
 
     <div class="card">
@@ -257,6 +257,7 @@ createApp({
       optSaturation: 115,
       optSmoothing: 150,
       optInvert: false,
+      pairHint: 'Search or enter the Bridge IP, identify it, then press Pair and push the button on the Bridge.',
       busy: { identify: false, discover: false, pair: false, areas: false, test: false, save: false, options: false, start: false, stop: false },
       toastMsg: '',
       toastKind: '',
@@ -345,10 +346,15 @@ createApp({
     },
     async pair() {
       this.busy.pair = true;
+      this.pairHint = 'Press the button on the Bridge now…';
       try {
         await this.api('/api/pair', 'POST', { ip: this.bridgeIp });
         this.toast('Bridge paired', 'ok');
-      } catch (e) { this.toast(e.message, 'err'); }
+        this.pairHint = 'Bridge paired. Select an Entertainment area.';
+      } catch (e) {
+        this.toast(e.message, 'err');
+        this.pairHint = 'Press the button on the Bridge, then try Pair again.';
+      }
       this.busy.pair = false;
       await this.poll();
     },

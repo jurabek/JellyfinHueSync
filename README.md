@@ -169,6 +169,10 @@ container mounts the same files at `/media/movies`, add:
 - `CONFIG_DIR` (default `/config`) holds `config.json`, which includes the Hue
   pairing secret (`clientkey`). The file is written with `0600` permissions.
 - `PORT` (default `8091`) changes the web UI port.
+- `HUE_SCAN_SUBNET` (optional) — an IPv4 CIDR such as `192.168.188.0/24` to
+  scan for the Bridge when the container is not on the same subnet (e.g.
+  Docker Desktop). Normally "Search network" uses the official Hue discovery
+  endpoint, then falls back to the container's own subnet.
 - Because this is a self-hosted LAN service rather than an Android app, the
   pairing secret is stored in that volume file instead of Android Keystore.
 

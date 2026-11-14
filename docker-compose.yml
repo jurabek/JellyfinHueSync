@@ -17,3 +17,6 @@ services:
     environment:
       - CONFIG_DIR=/config
       - PORT=8091
+      # Only needed when NOT using host networking (e.g. Docker Desktop on a
+      # laptop). Uncomment and set your LAN subnet so "Search network" works.
+      # - HUE_SCAN_SUBNET=192.168.188.0/24
