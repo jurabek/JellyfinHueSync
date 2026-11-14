@@ -1,0 +1,10 @@
+.git
+.gitignore
+.github
+config
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.exe
+jellyfin-hue-sync

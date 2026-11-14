@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jellyfin Hue Sync</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel2: #1c2230;
+    --border: #2a3140;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #4f8cff;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  .pill {
+    margin-left: auto;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .pill.syncing { color: var(--green); border-color: var(--green); }
+  main {
+    display: grid;
+    grid-template-columns: minmax(340px, 420px) 1fr;
+    gap: 20px;
+    padding: 20px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+  .row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  input[type=text], input[type=password], input[type=number], textarea {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font: inherit;
+    width: 100%;
+  }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  .grow { flex: 1; min-width: 160px; }
+  button {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 14px;
+    font: inherit;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.1); }
+  button.danger { background: var(--red); border-color: var(--red); color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .item {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel2);
+  }
+  .item:hover { border-color: var(--accent); }
+  .item.selected { border-color: var(--green); }
+  .item .title { font-weight: 500; }
+  .item .sub { color: var(--muted); font-size: 12px; }
+  .status-line { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted); flex: none;
+  }
+  .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.err { background: var(--red); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  .swatch {
+    width: 44px; height: 44px; border-radius: 10px;
+    border: 1px solid var(--border); background: #000;
+  }
+  .slider { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .slider label { width: 130px; color: var(--muted); font-size: 14px; flex: none; }
+  .slider input[type=range] { flex: 1; accent-color: var(--accent); }
+  .slider .val { width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; max-width: 360px;
+    background: #1c2230; border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 12px 16px; font-size: 14px;
+    display: none; z-index: 10;
+  }
+  .toast.err { border-left-color: var(--red); }
+  .toast.ok { border-left-color: var(--green); }
+  code { font-family: ui-monospace, monospace; font-size: 12px; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Jellyfin Hue Sync</h1>
+  <span class="pill" id="statusPill">Ready</span>
+</header>
+
+<main>
+  <div>
+    <div class="card">
+      <h2>01 · Hue Bridge</h2>
+      <div class="row">
+        <input type="text" id="bridgeIp" class="grow" placeholder="Bridge IP address, e.g. 192.168.1.20">
+        <button id="identifyBtn">Identify</button>
+        <button id="searchBtn">Search network</button>
+      </div>
+      <div id="discovered" class="list" style="margin-bottom:10px"></div>
+      <div id="bridgeInfo" class="muted" style="margin-bottom:10px"></div>
+      <div class="row">
+        <button id="pairBtn" class="primary grow">Pair Bridge</button>
+      </div>
+      <p class="muted" id="pairHint">Search or enter the Bridge IP, identify it, then press Pair and push the button on the Bridge.</p>
+    </div>
+
+    <div class="card">
+      <h2>02 · Entertainment Area</h2>
+      <div class="row">
+        <button id="refreshAreasBtn" class="grow">Refresh areas</button>
+      </div>
+      <div id="areas" class="list"></div>
+      <p class="muted" style="margin-top:10px">Create entertainment areas in the Philips Hue app first.</p>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>03 · Jellyfin</h2>
+      <div class="row">
+        <input type="text" id="jfUrl" class="grow" placeholder="Jellyfin URL, e.g. http://localhost:8096">
+        <input type="password" id="jfKey" class="grow" placeholder="API key">
+      </div>
+      <div class="row">
+        <input type="text" id="jfDevice" class="grow" placeholder="Device ID (optional)">
+        <input type="text" id="jfUser" class="grow" placeholder="User ID (optional)">
+      </div>
+      <label class="muted">Media path mappings (one per line): <code>jellyfinPath -&gt; containerPath</code></label>
+      <textarea id="jfMappings" rows="3" style="margin:6px 0 10px"
+        placeholder="/data/media/movies -> /media/movies&#10;/data/media/tv -> /media/tv"></textarea>
+      <div class="row">
+        <button id="jfTestBtn">Test connection</button>
+        <button id="jfSaveBtn" class="primary">Save Jellyfin</button>
+      </div>
+      <p class="muted" style="margin:0">Syncs the first playing session, or the session matching the Device/User ID when set.</p>
+    </div>
+
+    <div class="card">
+      <h2>04 · Light Response</h2>
+      <div class="slider"><label>Brightness</label><input type="range" id="optBrightness" min="0" max="100" step="1"><span class="val" id="optBrightnessVal"></span></div>
+      <div class="slider"><label>Saturation</label><input type="range" id="optSaturation" min="0" max="200" step="5"><span class="val" id="optSaturationVal"></span></div>
+      <div class="slider"><label>Smoothing</label><input type="range" id="optSmoothing" min="0" max="1000" step="10"><span class="val" id="optSmoothingVal"></span></div>
+      <div class="row" style="align-items:center">
+        <label style="color:var(--muted);font-size:14px"><input type="checkbox" id="optInvert" style="margin-right:8px">Invert left / right</label>
+        <button id="optSaveBtn" class="primary" style="margin-left:auto">Save options</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Options apply when you start the next sync session.</p>
+    </div>
+
+    <div class="card">
+      <h2>05 · Sync</h2>
+      <div class="status-line">
+        <span class="dot" id="dot"></span>
+        <strong id="statusText" style="flex:1">Ready</strong>
+        <button id="startBtn" class="primary">▶ Start sync</button>
+        <button id="stopBtn" class="danger">■ Stop</button>
+      </div>
+      <div id="playback" class="muted" style="margin-bottom:10px"></div>
+      <div class="swatches" id="swatches"></div>
+      <div id="syncStats" class="muted"></div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+let toastTimer = null;
+
+function toast(msg, kind) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (kind || '');
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+async function api(path, method, body) {
+  const opts = { method: method || 'GET', headers: {} };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    throw new Error((data && data.error) || ('HTTP ' + res.status));
+  }
+  return data;
+}
+
+function setVal(id, v) {
+  const el = $(id);
+  if (document.activeElement !== el) el.value = v;
+}
+
+function render() {
+  if (!state) return;
+  const pill = $('statusPill');
+  pill.textContent = state.status || 'Ready';
+  pill.className = 'pill' + (state.syncing ? ' syncing' : '');
+
+  setVal('bridgeIp', state.bridgeIp || '');
+  const b = state.bridgeName ? (state.bridgeName + ' · ' + state.bridgeId) : '';
+  $('bridgeInfo').textContent = state.paired ? ('Paired: ' + b) : (b || 'Not paired yet.');
+
+  const disc = $('discovered');
+  disc.innerHTML = '';
+  (state.discovered || []).forEach(br => {
+    const d = document.createElement('div');
+    d.className = 'item';
+    d.innerHTML = '<div class="title">' + escapeHtml(br.name || 'Hue Bridge') +
+      '</div><div class="sub">' + escapeHtml(br.ip) + '</div>';
+    d.onclick = () => { $('bridgeIp').value = br.ip; identify(br.ip); };
+    disc.appendChild(d);
+  });
+  if (state.discovering) {
+    const d = document.createElement('div');
+    d.className = 'muted';
+    d.textContent = 'Searching the local network…';
+    disc.appendChild(d);
+  }
+
+  const areas = $('areas');
+  areas.innerHTML = '';
+  (state.areas || []).forEach(a => {
+    const el = document.createElement('div');
+    el.className = 'item' + (a.id === state.areaId ? ' selected' : '');
+    el.innerHTML = '<div class="title">' + escapeHtml(a.name) +
+      '</div><div class="sub">' + a.channels + ' channel' + (a.channels === 1 ? '' : 's') +
+      (a.active ? ' · in use' : '') + '</div>';
+    el.onclick = async () => {
+      try { await api('/api/area', 'POST', { id: a.id }); await poll(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    areas.appendChild(el);
+  });
+  if (!state.areas || !state.areas.length) {
+    areas.innerHTML = '<div class="muted">No areas found. Create one in the Hue app, then refresh.</div>';
+  }
+
+  setVal('jfUrl', state.jellyfinUrl || '');
+  setVal('jfDevice', state.jellyfinDeviceId || '');
+  setVal('jfUser', state.jellyfinUserId || '');
+  if (document.activeElement !== $('jfMappings')) {
+    $('jfMappings').value = (state.mediaMappings || []).map(m => m.jellyfin + ' -> ' + m.container).join('\n');
+  }
+
+  const o = state.options || {};
+  const bs = Math.round((o.brightness ?? 0.75) * 100);
+  const sa = Math.round((o.saturation ?? 1.15) * 100);
+  if (document.activeElement !== $('optBrightness')) $('optBrightness').value = bs;
+  if (document.activeElement !== $('optSaturation')) $('optSaturation').value = sa;
+  if (document.activeElement !== $('optSmoothing')) $('optSmoothing').value = o.smoothingMs ?? 150;
+  if (document.activeElement !== $('optInvert')) $('optInvert').checked = o.invertHorizontal ?? false;
+  $('optBrightnessVal').textContent = bs + '%';
+  $('optSaturationVal').textContent = sa + '%';
+  $('optSmoothingVal').textContent = (o.smoothingMs ?? 150) + ' ms';
+
+  const dot = $('dot');
+  dot.className = 'dot' + (state.syncing ? ' on' : '');
+  $('statusText').textContent = state.status || 'Ready';
+  $('startBtn').disabled = state.syncing;
+  $('stopBtn').disabled = !state.syncing;
+  $('syncStats').textContent = state.packets ? (state.packets + ' packets sent') : '';
+
+  const pb = state.playback;
+  $('playback').textContent = pb
+    ? ((pb.itemName || 'playing') + ' · ' + formatTime(pb.positionSeconds) + (pb.isPaused ? ' · paused' : ''))
+    : '';
+
+  const sw = $('swatches');
+  sw.innerHTML = '';
+  (state.colors || []).forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'swatch';
+    d.style.background = '#' + c.toString(16).padStart(6, '0');
+    sw.appendChild(d);
+  });
+}
+
+function formatTime(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return (h ? pad(h) + ':' : '') + pad(m) + ':' + pad(sec);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function poll() {
+  try { state = await api('/api/state'); render(); }
+  catch (e) { /* transient */ }
+}
+
+async function identify(ip) {
+  try {
+    const b = await api('/api/identify', 'POST', { ip: ip || $('bridgeIp').value });
+    toast('Identified ' + (b.name || b.ip), 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  await poll();
+}
+
+function parseMappings(text) {
+  return text.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+    const parts = line.split('->');
+    if (parts.length === 2) return { jellyfin: parts[0].trim(), container: parts[1].trim() };
+    return null;
+  }).filter(Boolean);
+}
+
+$('searchBtn').onclick = async () => {
+  try { await api('/api/discover', 'POST'); toast('Searching…'); }
+  catch (e) { toast(e.message, 'err'); }
+  await poll();
+};
+$('identifyBtn').onclick = () => identify();
+$('pairBtn').onclick = async () => {
+  try {
+    $('pairHint').textContent = 'Press the button on the Bridge now…';
+    await api('/api/pair', 'POST', { ip: $('bridgeIp').value });
+    toast('Bridge paired', 'ok');
+    $('pairHint').textContent = 'Bridge paired. Select an Entertainment area.';
+  } catch (e) {
+    toast(e.message, 'err');
+    $('pairHint').textContent = 'Press the button on the Bridge, then try Pair again.';
+  }
+  await poll();
+};
+$('refreshAreasBtn').onclick = async () => {
+  try { await api('/api/areas'); toast('Areas refreshed', 'ok'); }
+  catch (e) { toast(e.message, 'err'); }
+  await poll();
+};
+$('jfTestBtn').onclick = async () => {
+  try {
+    const ok = await api('/api/jellyfin/test', 'POST', { url: $('jfUrl').value, apiKey: $('jfKey').value });
+    toast(ok && ok.ok ? 'Jellyfin connected' : 'Jellyfin connection failed', ok && ok.ok ? 'ok' : 'err');
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('jfSaveBtn').onclick = async () => {
+  try {
+    await api('/api/jellyfin', 'POST', {
+      url: $('jfUrl').value,
+      apiKey: $('jfKey').value,
+      userId: $('jfUser').value.trim(),
+      deviceId: $('jfDevice').value.trim(),
+      mediaMappings: parseMappings($('jfMappings').value)
+    });
+    toast('Jellyfin settings saved', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('optSaveBtn').onclick = async () => {
+  try {
+    await api('/api/options', 'POST', {
+      brightness: parseInt($('optBrightness').value, 10) / 100,
+      saturation: parseInt($('optSaturation').value, 10) / 100,
+      smoothingMs: parseInt($('optSmoothing').value, 10),
+      invertHorizontal: $('optInvert').checked,
+      extractFps: state.options.extractFps,
+      streamRate: state.options.streamRate,
+      frameWidth: state.options.frameWidth,
+      frameHeight: state.options.frameHeight,
+      segmentSeconds: state.options.segmentSeconds
+    });
+    toast('Options saved', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('startBtn').onclick = async () => {
+  try { await api('/api/sync/start', 'POST'); toast('Starting sync…'); }
+  catch (e) { toast(e.message, 'err'); }
+  await poll();
+};
+$('stopBtn').onclick = async () => {
+  try { await api('/api/sync/stop', 'POST'); toast('Stopped', 'ok'); }
+  catch (e) { toast(e.message, 'err'); }
+  await poll();
+};
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

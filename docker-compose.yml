@@ -1,0 +1,19 @@
+services:
+  jellyfin-hue-sync:
+    build: .
+    image: jellyfin-hue-sync:latest
+    container_name: jellyfin-hue-sync
+    # Host networking keeps Bridge discovery (subnet scan), the DTLS UDP
+    # stream to the Bridge on port 2100, and access to Jellyfin working
+    # exactly like they would on the host.
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+      # Mount the SAME media files Jellyfin serves, read-only. The path you
+      # choose here is what you enter as the "container" side of the media
+      # path mappings in the web UI.
+      - /path/to/your/media:/media:ro
+    environment:
+      - CONFIG_DIR=/config
+      - PORT=8091

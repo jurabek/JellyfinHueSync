@@ -1,0 +1,6 @@
+config/
+.agents/
+*.log
+*.exe
+jellyfin-hue-sync
+.DS_Store
