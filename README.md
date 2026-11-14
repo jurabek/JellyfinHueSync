@@ -108,39 +108,42 @@ docker build -t jellyfin-hue-sync .
 
 ## Wiring it to your linuxserver Jellyfin
 
-`docker-compose.yml` already mounts media read-only at `/media`. Jellyfin has
-its own view of those files (for example `/data/media/movies`). The web UI
-therefore has **media path mappings** that rewrite Jellyfin's path into this
-container's path.
+The simplest setup is to mount the **same host directory at the same container
+path** in both Jellyfin and this container, so Jellyfin's reported media paths
+resolve identically here — no media path mapping needed.
 
-Example — if your Jellyfin container mounts media like this:
+Example — your Jellyfin binds the media share like this:
 
 ```yaml
 # jellyfin compose (for reference — not this project)
 services:
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - DOCKER_MODS=linuxserver/mods:jellyfin-amd
     volumes:
-      - /mnt/library/movies:/data/media/movies
-      - /mnt/library/tv:/data/media/tv
+      - /mnt/user/appdata/jellyfin:/config
+      - /mnt/user/appdata/jellyfin/jellyfin_cache:/cache
+      - type: bind
+        source: /mnt/user/media
+        target: /media
 ```
 
-then mount the same host directories here:
+then mount the same share at the same target here:
 
 ```yaml
 # this project's docker-compose.yml
 services:
   jellyfin-hue-sync:
     volumes:
-      - /mnt/library/movies:/media/movies:ro
-      - /mnt/library/tv:/media/tv:ro
+      - /mnt/user/media:/media:ro
 ```
 
-and enter these mappings in the web UI:
+Because both containers now see the files under `/media/...`, a path Jellyfin
+reports (e.g. `/media/movies/Movie.mkv`) already exists in this container —
+leave the web UI media mappings empty.
+
+If your two containers mount media at *different* paths, use the media path
+mappings instead. For example, if Jellyfin sees `/data/media/movies` but this
+container mounts the same files at `/media/movies`, add:
 
 ```
 /data/media/movies -> /media/movies

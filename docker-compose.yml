@@ -10,10 +10,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./config:/config
-      # Mount the SAME media files Jellyfin serves, read-only. The path you
-      # choose here is what you enter as the "container" side of the media
-      # path mappings in the web UI.
-      - /path/to/your/media:/media:ro
+      # Mount the SAME host directory at the SAME target path Jellyfin uses,
+      # read-only. Your Jellyfin binds /mnt/user/media -> /media, so do the
+      # same here: paths then match 1:1 and the web UI needs no media mapping.
+      - /mnt/user/media:/media:ro
     environment:
       - CONFIG_DIR=/config
       - PORT=8091
